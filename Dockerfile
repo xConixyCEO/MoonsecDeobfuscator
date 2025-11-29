@@ -1,5 +1,3 @@
-build stage
-
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /app
 
@@ -9,8 +7,6 @@ RUN dotnet restore
 
 COPY . ./
 RUN dotnet publish -c Release -o out
-
-runtime stage
 
 FROM mcr.microsoft.com/dotnet/runtime:9.0
 WORKDIR /app
