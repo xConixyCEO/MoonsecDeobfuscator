@@ -1,4 +1,6 @@
-﻿using MoonsecDeobfuscator.Ast;
+using System.Collections.Generic;
+using System.Linq;
+using MoonsecDeobfuscator.Ast;
 using MoonsecDeobfuscator.Bytecode.Models;
 using MoonsecDeobfuscator.Deobfuscation.Rewriters;
 using MoonsecDeobfuscator.Deobfuscation.Utils;
@@ -23,7 +25,9 @@ public class BytecodeDeobfuscator(Function function, Context ctx)
         CreateHandlerMapping();
         DeobfuscateOpcodes(_rootFunction);
         DeobfuscateControlFlow(_rootFunction);
-        FixProgramEntry();
+        
+        // FixProgramEntry(); // COMMENTED: Keeps MoonSec signature intact
+        
         RebuildConstantPool(_rootFunction);
         SetFlags(_rootFunction);
         _rootFunction.IsVarArgFlag = 2;
@@ -130,9 +134,6 @@ public class BytecodeDeobfuscator(Function function, Context ctx)
         }
     }
 
-    /*
-        Insert Return after TailCall if not present
-    */
     private static void FixTailCall(Function function)
     {
         var instructions = function.Instructions;
@@ -155,13 +156,6 @@ public class BytecodeDeobfuscator(Function function, Context ctx)
         }
     }
 
-    /*
-        The actual program starts after this check and anything before is to be removed.
-
-        if GLOBAL ~= "This file was protected with MoonSec V3" then
-            return
-        end
-    */
     private void FixProgramEntry()
     {
         var check = _rootFunction.Instructions
@@ -188,9 +182,6 @@ public class BytecodeDeobfuscator(Function function, Context ctx)
         RemoveUnusedFunctions();
     }
 
-    /*
-        FixProgramEntry might leave some unused functions so we remove them here
-    */
     private void RemoveUnusedFunctions()
     {
         var functionReferences = new Dictionary<Instruction, Function>();
