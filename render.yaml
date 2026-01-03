@@ -4,6 +4,7 @@ services:
     env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    plan: free
     envVars:
       - key: DOTNET_VERSION
         value: 9.0
@@ -13,10 +14,9 @@ services:
         value: http://+:3000
       - key: DISCORD_BOT_TOKEN
         sync: false
+        required: true
       - key: DISCORD_CLIENT_ID
         sync: false
-      - key: DISCORD_GUILD_ID
-        optional: true
-        sync: false
+        required: true
     healthCheckPath: /
     autoDeploy: true
