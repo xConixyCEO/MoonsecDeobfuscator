@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: moonsec-deobfuscator-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: DOTNET_VERSION
+        value: 9.0
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:3000
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_GUILD_ID
+        optional: true
+        sync: false
+    healthCheckPath: /
+    autoDeploy: true
