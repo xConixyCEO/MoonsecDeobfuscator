@@ -1,24 +1,21 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
-
-# Build our Discord bot only
 WORKDIR /app
-COPY MoonsecDeobfuscatorBot/*.csproj .
+
+# Copy project file and restore dependencies
+COPY MoonsecDeobfuscator.csproj ./
 RUN dotnet restore
 
-COPY MoonsecDeobfuscatorBot/ .
+# Copy everything else and build
+COPY . ./
 RUN dotnet publish -c Release -o /app/out
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/out .
-
-# Create a non-root user
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
-USER appuser
 
 # Expose port for Render
 EXPOSE 3000
 
 # Start the Discord bot
-ENTRYPOINT ["dotnet", "MoonsecDeobfuscatorBot.dll"]
+ENTRYPOINT ["dotnet", "MoonsecDeobfuscator.dll", "--discord-bot"]
