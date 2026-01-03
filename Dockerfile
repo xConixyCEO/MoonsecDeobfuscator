@@ -1,24 +1,26 @@
-# STAGE 1: Build
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /app
 
-# Copy csproj and restore dependencies
-COPY *.csproj ./
+# Copy project file and restore dependencies
+COPY MoonsecDeobfuscator.csproj ./
 RUN dotnet restore
 
-# Copy the rest of the source code
+# Copy everything else and build
 COPY . ./
+RUN dotnet publish -c Release -o /app/out
 
-# Publish targeting the project file specifically to avoid Solution-level errors
-RUN dotnet publish MoonsecDeobfuscator.csproj -c Release -o /app/out /p:UseAppHost=false
-
-# STAGE 2: Runtime
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+# Runtime stage
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/out .
 
-# Set the port to 3000
-EXPOSE 3000
-ENV ASPNETCORE_URLS=http://+:3000
+# Create a non-root user (recommended for security)
+RUN addgroup --system --gid 1000 appgroup && \
+    adduser --system --uid 1000 --ingroup appgroup appuser
+USER appuser
 
-ENTRYPOINT ["dotnet", "MoonsecDeobfuscator.dll"]
+# Expose port for Render
+EXPOSE 3000
+
+# Start the Discord bot
+ENTRYPOINT ["dotnet", "MoonsecDeobfuscator.dll", "--discord-bot"]
