@@ -3,12 +3,18 @@ using MoonsecDeobfuscator.Bytecode.Models;
 
 namespace MoonsecDeobfuscator.Deobfuscation.Bytecode;
 
-public class Disassembler(Function rootFunction)
+public class Disassembler
 {
+    private readonly Function _rootFunction;
     private readonly StringBuilder _builder = new();
     private int _indentLevel = 0;
-    private readonly List<string> _localVariables = new();
     private int _currentLine = 0;
+    private List<Instruction>? _currentInstructions;
+
+    public Disassembler(Function rootFunction)
+    {
+        _rootFunction = rootFunction;
+    }
 
     public string Disassemble()
     {
@@ -16,7 +22,7 @@ public class Disassembler(Function rootFunction)
         _builder.AppendLine("-- Generated: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
         _builder.AppendLine();
         
-        DisassembleFunction(rootFunction, true);
+        DisassembleFunction(_rootFunction, true);
         return _builder.ToString();
     }
 
@@ -24,6 +30,7 @@ public class Disassembler(Function rootFunction)
     {
         var localVarNames = new Dictionary<int, string>();
         var instructions = function.Instructions;
+        _currentInstructions = instructions;
         
         // Process instructions to generate Lua code
         for (var i = 0; i < instructions.Count; i++)
@@ -100,16 +107,19 @@ public class Disassembler(Function rootFunction)
 
             case OpCode.Call:
                 // Handle function calls
-                if (C == 2 && instruction.A == 0 && instructions[_currentLine - 1]?.OpCode == OpCode.Self)
+                if (_currentInstructions != null && C == 2 && instruction.A == 0 && 
+                    _currentLine > 0 && _currentInstructions[_currentLine - 1]?.OpCode == OpCode.Self)
                 {
                     // Pattern: GetService call
-                    var serviceName = instructions[_currentLine - 2].OpCode == OpCode.LoadK 
-                        ? FormatConstant(function.Constants[instructions[_currentLine - 2].B])
-                        : $"R{instructions[_currentLine - 2].B}";
-                    
-                    return $"local R{A} = game:GetService({serviceName})";
+                    if (_currentLine > 1 && _currentInstructions[_currentLine - 2]?.OpCode == OpCode.LoadK)
+                    {
+                        var serviceConstant = function.Constants[_currentInstructions[_currentLine - 2].B];
+                        var serviceName = FormatConstant(serviceConstant);
+                        return $"local R{A} = game:GetService({serviceName})";
+                    }
                 }
-                else if (A == 9 && C == 2 && instructions[_currentLine - 1]?.OpCode == OpCode.LoadBool)
+                else if (A == 9 && C == 2 && _currentInstructions != null && 
+                         _currentLine > 0 && _currentInstructions[_currentLine - 1]?.OpCode == OpCode.LoadBool)
                 {
                     // Pattern: HttpGet with boolean
                     return $"local R{A} = game:HttpGet(R{instruction.A + 1}, R{instruction.A + 2}, true)";
@@ -118,9 +128,10 @@ public class Disassembler(Function rootFunction)
 
             case OpCode.Test:
                 // Conditional jump - start of if statement
-                if (C == 1 && instructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
+                if (_currentInstructions != null && C == 1 && 
+                    _currentLine + 1 < _currentInstructions.Count && 
+                    _currentInstructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
                 {
-                    var jmpOffset = instructions[_currentLine + 1].B;
                     var condition = C == 0 ? $"not R{A}" : $"R{A}";
                     
                     _indentLevel++;
@@ -168,7 +179,9 @@ public class Disassembler(Function rootFunction)
                 return $"local R{A} = {table}[{index}]";
 
             case OpCode.Eq:
-                if (instructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
+                if (_currentInstructions != null && 
+                    _currentLine + 1 < _currentInstructions.Count && 
+                    _currentInstructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
                 {
                     var left = B >= 256 ? FormatConstant(function.Constants[B - 256]) : $"R{B}";
                     var right = C >= 256 ? FormatConstant(function.Constants[C - 256]) : $"R{C}";
@@ -196,7 +209,11 @@ public class Disassembler(Function rootFunction)
                 return $"{string.Join(", ", Enumerable.Range(3, C).Select(i => $"R{A + i}"))} = {iterator}({state}, {control})";
 
             case OpCode.Closure:
-                return $"local R{A} = function() -- function_{function.Functions[B].Name}";
+                if (B < function.Functions.Count)
+                {
+                    return $"local R{A} = function() -- function_{function.Functions[B].Name}";
+                }
+                break;
 
             case OpCode.LoadBool:
                 var value = B != 0 ? "true" : "false";
