@@ -1,109 +1,140 @@
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
-using MoonsecDeobfuscator.Deobfuscation;
-using MoonsecDeobfuscator.Deobfuscation.Bytecode;
-using System.Net;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using dotenv.net;
+using System.Net;
+using MoonsecDeobfuscator.Deobfuscation;
+using MoonsecDeobfuscator.Deobfuscation.Bytecode;
 
-namespace MoonsecDeobfuscator.DiscordBot;
+namespace MoonsecDeobfuscator;
 
 public class Program
 {
     public static async Task Main(string[] args)
     {
-        // Load environment variables
-        DotEnv.Load();
-        
-        // Get configuration from environment variables
+        // Load environment variables from .env file if it exists
+        try
+        {
+            DotEnv.Load();
+        }
+        catch
+        {
+            Console.WriteLine("Note: No .env file found, using environment variables only");
+        }
+
         var token = Environment.GetEnvironmentVariable("DISCORD_BOT_TOKEN");
-        var clientId = Environment.GetEnvironmentVariable("DISCORD_CLIENT_ID");
-        var guildId = Environment.GetEnvironmentVariable("DISCORD_GUILD_ID"); // Optional for testing
         
         if (string.IsNullOrEmpty(token))
         {
-            Console.WriteLine("❌ DISCORD_BOT_TOKEN not found in environment variables!");
+            Console.WriteLine("❌ ERROR: DISCORD_BOT_TOKEN environment variable is not set!");
+            Console.WriteLine("Please set it in your Render environment variables or .env file");
             return;
         }
 
-        // Create host builder for background service
+        // Start HTTP server on port 3000 for Render health checks
+        _ = StartHttpServer();
+
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureServices((context, services) =>
             {
+                // Configure Discord client
                 services.AddSingleton<DiscordSocketClient>(provider =>
                 {
                     return new DiscordSocketClient(new DiscordSocketConfig
                     {
                         LogLevel = LogSeverity.Info,
-                        GatewayIntents = GatewayIntents.GuildMessages | 
-                                        GatewayIntents.MessageContent |
-                                        GatewayIntents.Guilds,
+                        GatewayIntents = GatewayIntents.Guilds | 
+                                        GatewayIntents.GuildMessages |
+                                        GatewayIntents.MessageContent,
                         AlwaysDownloadUsers = true,
                         MessageCacheSize = 100
                     });
                 });
-                
-                services.AddSingleton<InteractionService>();
+
+                // Configure Interaction Service
+                services.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()));
                 services.AddSingleton<InteractionHandler>();
-                services.AddHostedService<DiscordBotService>();
+                
+                // Add hosted service
+                services.AddHostedService<DiscordBotHostedService>();
             })
             .Build();
 
         await host.RunAsync();
     }
+
+    private static async Task StartHttpServer()
+    {
+        try
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add("http://*:3000/");
+            listener.Start();
+            Console.WriteLine("✅ HTTP Server started on port 3000");
+
+            while (true)
+            {
+                var context = await listener.GetContextAsync();
+                var response = context.Response;
+                
+                string responseString = @"
+                <html>
+                    <head>
+                        <title>Moonsec Deobfuscator Discord Bot</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; margin: 40px; background: #f0f0f0; }
+                            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                            h1 { color: #333; }
+                            .status { padding: 10px; background: #4CAF50; color: white; border-radius: 5px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class='container'>
+                            <h1>🤖 Moonsec Deobfuscator Discord Bot</h1>
+                            <div class='status'>✅ Bot is running and healthy!</div>
+                            <p>Use <code>/deobfuscate</code> commands in Discord.</p>
+                        </div>
+                    </body>
+                </html>";
+                
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                await response.OutputStream.WriteAsync(buffer);
+                response.Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ HTTP Server error: {ex.Message}");
+        }
+    }
 }
 
-public class DiscordBotService : IHostedService
+public class DiscordBotHostedService : IHostedService
 {
     private readonly DiscordSocketClient _client;
     private readonly InteractionService _interactions;
     private readonly InteractionHandler _handler;
-    private readonly IHostApplicationLifetime _lifetime;
-    
-    public DiscordBotService(
+    private readonly IServiceProvider _services;
+
+    public DiscordBotHostedService(
         DiscordSocketClient client,
         InteractionService interactions,
         InteractionHandler handler,
-        IHostApplicationLifetime lifetime)
+        IServiceProvider services)
     {
         _client = client;
         _interactions = interactions;
         _handler = handler;
-        _lifetime = lifetime;
+        _services = services;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Start HTTP server on port 3000 for Render
-        var httpListener = new HttpListener();
-        httpListener.Prefixes.Add("http://*:3000/");
-        httpListener.Start();
-        
-        Console.WriteLine("🌐 HTTP Server started on port 3000");
-        
-        // Handle HTTP requests in background
-        _ = Task.Run(async () =>
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var context = await httpListener.GetContextAsync();
-                var response = context.Response;
-                
-                var responseString = "<html><body><h1>Moonsec Deobfuscator Discord Bot</h1><p>Bot is running!</p></body></html>";
-                var buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
-                
-                response.ContentLength64 = buffer.Length;
-                await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                response.Close();
-            }
-        });
-
-        // Setup Discord client
         _client.Log += LogAsync;
         _client.Ready += ReadyAsync;
-        
+
         await _handler.InitializeAsync();
         
         var token = Environment.GetEnvironmentVariable("DISCORD_BOT_TOKEN");
@@ -129,21 +160,9 @@ public class DiscordBotService : IHostedService
     {
         Console.WriteLine($"✅ {_client.CurrentUser.Username} is connected!");
         
-        // Register slash commands globally (or to specific guild for testing)
-        var guildId = Environment.GetEnvironmentVariable("DISCORD_GUILD_ID");
-        
-        if (!string.IsNullOrEmpty(guildId) && ulong.TryParse(guildId, out var guildUlong))
-        {
-            // Register to specific guild for faster testing
-            await _interactions.RegisterCommandsToGuildAsync(guildUlong);
-            Console.WriteLine($"📝 Slash commands registered to guild: {guildId}");
-        }
-        else
-        {
-            // Register globally (takes up to 1 hour to propagate)
-            await _interactions.RegisterCommandsGloballyAsync();
-            Console.WriteLine("📝 Slash commands registered globally");
-        }
+        // Register commands
+        await _interactions.RegisterCommandsGloballyAsync();
+        Console.WriteLine("📝 Slash commands registered globally");
     }
 }
 
@@ -153,7 +172,10 @@ public class InteractionHandler
     private readonly InteractionService _interactions;
     private readonly IServiceProvider _services;
 
-    public InteractionHandler(DiscordSocketClient client, InteractionService interactions, IServiceProvider services)
+    public InteractionHandler(
+        DiscordSocketClient client,
+        InteractionService interactions,
+        IServiceProvider services)
     {
         _client = client;
         _interactions = interactions;
@@ -162,8 +184,9 @@ public class InteractionHandler
 
     public async Task InitializeAsync()
     {
-        await _interactions.AddModulesAsync(System.Reflection.Assembly.GetEntryAssembly(), _services);
-        
+        // Add command modules
+        await _interactions.AddModuleAsync<DeobfuscateCommands>(_services);
+
         _client.InteractionCreated += HandleInteraction;
         _interactions.SlashCommandExecuted += SlashCommandExecuted;
     }
@@ -181,8 +204,7 @@ public class InteractionHandler
             
             if (interaction.Type == InteractionType.ApplicationCommand)
             {
-                await interaction.GetOriginalResponseAsync()
-                    .ContinueWith(async (msg) => await msg.Result.DeleteAsync());
+                await interaction.RespondAsync($"❌ Error: {ex.Message}", ephemeral: true);
             }
         }
     }
@@ -197,74 +219,38 @@ public class InteractionHandler
     }
 }
 
-// Slash command module
 [Group("deobfuscate", "Deobfuscate Moonsec-protected Lua files")]
 public class DeobfuscateCommands : InteractionModuleBase<SocketInteractionContext>
 {
     [SlashCommand("dev", "Deobfuscate Lua file and get bytecode")]
-    public async Task DeobfuscateDev(
-        [Summary("file", "The Lua file to deobfuscate")] IAttachment file)
+    public async Task DevCommand(IAttachment file)
     {
-        if (!file.Filename.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
-        {
-            await RespondAsync("❌ Please provide a .lua file", ephemeral: true);
-            return;
-        }
-
-        await DeferAsync(); // Acknowledge the command
-        
-        try
-        {
-            using var httpClient = new HttpClient();
-            var luaContent = await httpClient.GetStringAsync(file.Url);
-            
-            var result = new Deobfuscator().Deobfuscate(luaContent);
-            
-            // Convert to bytecode
-            using var memoryStream = new MemoryStream();
-            using var serializer = new Serializer(memoryStream);
-            serializer.Serialize(result);
-            
-            var bytecode = memoryStream.ToArray();
-            var base64 = Convert.ToBase64String(bytecode);
-            
-            // Create embed response
-            var embed = new EmbedBuilder()
-                .WithColor(Color.Green)
-                .WithTitle("✅ Deobfuscation Complete")
-                .WithDescription($"**File:** {file.Filename}")
-                .AddField("Status", "Successfully deobfuscated")
-                .WithFooter($"Requested by {Context.User.Username}")
-                .WithCurrentTimestamp()
-                .Build();
-            
-            // Send bytecode as file if too large
-            if (base64.Length > 1900)
-            {
-                var tempFile = Path.GetTempFileName() + ".bytecode";
-                await File.WriteAllBytesAsync(tempFile, bytecode);
-                
-                await FollowupWithFileAsync(tempFile, 
-                    $"{Path.GetFileNameWithoutExtension(file.Filename)}_deobfuscated.bytecode",
-                    embed: embed);
-                
-                File.Delete(tempFile);
-            }
-            else
-            {
-                await FollowupAsync(embed: embed);
-                await FollowupAsync($"Bytecode (Base64):\n```\n{base64}\n```", ephemeral: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            await FollowupAsync($"❌ Error during deobfuscation: {ex.Message}", ephemeral: true);
-        }
+        await HandleDeobfuscation(file, "dev");
     }
 
     [SlashCommand("dis", "Deobfuscate Lua file and get disassembly")]
-    public async Task DeobfuscateDis(
-        [Summary("file", "The Lua file to deobfuscate")] IAttachment file)
+    public async Task DisCommand(IAttachment file)
+    {
+        await HandleDeobfuscation(file, "dis");
+    }
+
+    [SlashCommand("help", "Show help information")]
+    public async Task HelpCommand()
+    {
+        var embed = new EmbedBuilder()
+            .WithColor(Color.Blue)
+            .WithTitle("Moonsec Deobfuscator Help")
+            .WithDescription("Deobfuscate Moonsec-protected Lua files")
+            .AddField("Commands", 
+                "`/deobfuscate dev` - Upload a .lua file to get bytecode\n" +
+                "`/deobfuscate dis` - Upload a .lua file to get disassembly")
+            .WithFooter("Attach a .lua file when using the commands")
+            .Build();
+            
+        await RespondAsync(embed: embed, ephemeral: true);
+    }
+
+    private async Task HandleDeobfuscation(IAttachment file, string mode)
     {
         if (!file.Filename.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
         {
@@ -273,88 +259,47 @@ public class DeobfuscateCommands : InteractionModuleBase<SocketInteractionContex
         }
 
         await DeferAsync();
-        
+
         try
         {
             using var httpClient = new HttpClient();
             var luaContent = await httpClient.GetStringAsync(file.Url);
             
-            var result = new Deobfuscator().Deobfuscate(luaContent);
-            var disassembly = new Disassembler(result).Disassemble();
-            
-            // Create embed response
-            var embed = new EmbedBuilder()
-                .WithColor(Color.Blue)
-                .WithTitle("📄 Disassembly Complete")
-                .WithDescription($"**File:** {file.Filename}")
-                .AddField("Status", "Successfully disassembled")
-                .WithFooter($"Requested by {Context.User.Username}")
-                .WithCurrentTimestamp()
-                .Build();
-            
-            // Send as file if too large
-            if (disassembly.Length > 1900)
+            var deobfuscator = new Deobfuscator();
+            var result = deobfuscator.Deobfuscate(luaContent);
+
+            if (mode == "dev")
             {
+                using var memoryStream = new MemoryStream();
+                using var serializer = new Serializer(memoryStream);
+                serializer.Serialize(result);
+                
+                var bytecode = memoryStream.ToArray();
+                var tempFile = Path.GetTempFileName() + ".bytecode";
+                await File.WriteAllBytesAsync(tempFile, bytecode);
+                
+                await FollowupWithFileAsync(tempFile, 
+                    $"{Path.GetFileNameWithoutExtension(file.Filename)}_deobfuscated.bytecode");
+                
+                File.Delete(tempFile);
+            }
+            else if (mode == "dis")
+            {
+                var disassembler = new Disassembler(result);
+                var disassembly = disassembler.Disassemble();
+                
                 var tempFile = Path.GetTempFileName() + ".txt";
                 await File.WriteAllTextAsync(tempFile, disassembly);
                 
                 await FollowupWithFileAsync(tempFile, 
-                    $"{Path.GetFileNameWithoutExtension(file.Filename)}_disassembly.txt",
-                    embed: embed);
+                    $"{Path.GetFileNameWithoutExtension(file.Filename)}_disassembly.txt");
                 
                 File.Delete(tempFile);
-            }
-            else
-            {
-                var truncated = disassembly.Length > 1000 ? 
-                    disassembly.Substring(0, 1000) + "\n... (truncated)" : 
-                    disassembly;
-                    
-                await FollowupAsync(embed: embed);
-                await FollowupAsync($"Disassembly:\n```lua\n{truncated}\n```");
             }
         }
         catch (Exception ex)
         {
-            await FollowupAsync($"❌ Error during disassembly: {ex.Message}", ephemeral: true);
+            await FollowupAsync($"❌ Error: {ex.Message}", ephemeral: true);
         }
-    }
-
-    [SlashCommand("help", "Show help information")]
-    public async Task Help()
-    {
-        var embed = new EmbedBuilder()
-            .WithColor(Color.Purple)
-            .WithTitle("🤖 Moonsec Deobfuscator")
-            .WithDescription("Deobfuscate Moonsec-protected Lua files using slash commands")
-            .AddField("Commands", 
-                "`/deobfuscate dev [file]` - Deobfuscate and get bytecode\n" +
-                "`/deobfuscate dis [file]` - Deobfuscate and get disassembly\n" +
-                "`/deobfuscate help` - Show this help")
-            .AddField("Usage", 
-                "1. Type `/deobfuscate` and choose a command\n" +
-                "2. Attach a .lua file when prompted")
-            .AddField("Note", 
-                "Files must be .lua files protected with Moonsec")
-            .WithFooter("Made with MoonsecDeobfuscator")
-            .WithCurrentTimestamp()
-            .Build();
-        
-        await RespondAsync(embed: embed, ephemeral: true);
-    }
-
-    [SlashCommand("ping", "Check bot latency")]
-    public async Task Ping()
-    {
-        var latency = Context.Client.Latency;
-        var embed = new EmbedBuilder()
-            .WithColor(latency < 100 ? Color.Green : latency < 200 ? Color.Orange : Color.Red)
-            .WithTitle("🏓 Pong!")
-            .AddField("Latency", $"{latency}ms")
-            .AddField("Status", latency < 100 ? "Excellent" : latency < 200 ? "Good" : "Slow")
-            .WithCurrentTimestamp()
-            .Build();
-        
-        await RespondAsync(embed: embed);
     }
 }
