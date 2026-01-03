@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using MoonsecDeobfuscator.Bytecode.Models;
 
 namespace MoonsecDeobfuscator.Deobfuscation.Bytecode;
@@ -6,207 +6,255 @@ namespace MoonsecDeobfuscator.Deobfuscation.Bytecode;
 public class Disassembler(Function rootFunction)
 {
     private readonly StringBuilder _builder = new();
+    private int _indentLevel = 0;
+    private readonly List<string> _localVariables = new();
+    private int _currentLine = 0;
 
     public string Disassemble()
     {
-        _builder.AppendLine("-- Disassembled with MoonSec V3 deobfuscator by #tupsutumppu");
-        DisassembleFunction(rootFunction);
+        _builder.AppendLine("-- Decompiled with MoonSec V3 deobfuscator by #tupsutumppu");
+        _builder.AppendLine("-- Generated: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        _builder.AppendLine();
+        
+        DisassembleFunction(rootFunction, true);
         return _builder.ToString();
     }
 
-    private void DisassembleFunction(Function function)
+    private void DisassembleFunction(Function function, bool isRoot = false)
     {
-        _builder.Append($"function {function.Name}(");
-
-        for (var i = 0; i < function.NumParams; i++)
-        {
-            _builder.Append($"R{i}");
-
-            if (i + 1 < function.NumParams)
-                _builder.Append(", ");
-        }
-
-        if (function.IsVarArgFlag == 2)
-            _builder.Append(function.NumParams > 0 ? ", ..." : "...");
-
-        _builder.AppendLine(")");
-        _builder.AppendLine(
-            $"\t[Slots: {function.MaxStackSize}, Upvalues: {function.NumUpvalues}, Constants: {function.Constants.Count}]");
-
+        var localVarNames = new Dictionary<int, string>();
         var instructions = function.Instructions;
-
+        
+        // Process instructions to generate Lua code
         for (var i = 0; i < instructions.Count; i++)
         {
-            _builder.Append($"\t[{i,4}]\t");
-            DisassembleInstruction(instructions[i]);
+            var instruction = instructions[i];
+            _currentLine = i;
+            
+            // Skip dead instructions
+            if (instruction.IsDead) continue;
+            
+            // Generate code based on opcode
+            var codeLine = GenerateLuaCode(instruction, function, localVarNames);
+            
+            if (!string.IsNullOrEmpty(codeLine))
+            {
+                // Add indentation
+                _builder.Append(new string(' ', _indentLevel * 4));
+                _builder.AppendLine(codeLine);
+            }
         }
-
-        _builder.AppendLine("end");
-
-        foreach (var childFunction in function.Functions)
-            DisassembleFunction(childFunction);
     }
 
-    private void DisassembleInstruction(Instruction instruction)
+    private string GenerateLuaCode(Instruction instruction, Function function, Dictionary<int, string> localVarNames)
     {
         var A = instruction.A;
         var B = instruction.B;
         var C = instruction.C;
-
-        if (instruction.OpCode != OpCode.Unknown)
-            _builder.Append($"{instruction.OpCode,12}\t| {A,4} | {B,4} | {C,4} |");
-        else if (instruction.IsDead)
-            _builder.Append($"{"DEAD",12}\t| {"-",4} | {"-",4} | {"-",4} |");
-        else
-            _builder.Append($"{instruction.OpNum,12}\t| {A,4} | {B,4} | {C,4} |");
-
-        if (instruction.OpCode != OpCode.Unknown)
-        {
-            _builder.Append('\t');
-            _builder.Append(GenAnnotation(instruction));
-        }
-
-        _builder.AppendLine();
-    }
-
-    private static string GenAnnotation(Instruction instruction)
-    {
-        var A = instruction.A;
-        var B = instruction.B;
-        var C = instruction.C;
-        var function = instruction.Function;
 
         switch (instruction.OpCode)
         {
             case OpCode.GetGlobal:
-                return $"R{A} = {((StringConstant) function.Constants[B]).Value}";
-            case OpCode.SetGlobal:
-                return $"{((StringConstant) function.Constants[B]).Value} = R{A}";
+                if (B < function.Constants.Count && function.Constants[B] is StringConstant strConst)
+                {
+                    var globalName = strConst.Value;
+                    // Check if this is a common Roblox API call pattern
+                    if (globalName == "_G")
+                    {
+                        return "";
+                    }
+                    else if (globalName == "game" || globalName == "workspace" || globalName == "script")
+                    {
+                        return $"local R{A} = {globalName}";
+                    }
+                    else
+                    {
+                        return $"local R{A} = {globalName}";
+                    }
+                }
+                break;
+
             case OpCode.LoadK:
-                return $"R{A} = {function.Constants.ElementAtOrDefault(B)}";
-            case OpCode.LoadNil:
-                return B - A == 0 ? $"R{A} = nil" : $"R{A}->R{B} = nil";
+                if (B < function.Constants.Count)
+                {
+                    var constant = function.Constants[B];
+                    var constStr = FormatConstant(constant);
+                    return $"local R{A} = {constStr}";
+                }
+                break;
+
+            case OpCode.SetTable:
+                if (B >= 256 && C >= 256)
+                {
+                    var key = FormatConstant(function.Constants[B - 256]);
+                    var value = FormatConstant(function.Constants[C - 256]);
+                    return $"R{instruction.A}[{key}] = {value}";
+                }
+                break;
+
+            case OpCode.Move:
+                // Local variable assignment
+                var sourceName = GetRegisterName(B, localVarNames);
+                localVarNames[A] = sourceName;
+                return $"local R{A} = {sourceName}";
+
+            case OpCode.Call:
+                // Handle function calls
+                if (C == 2 && instruction.A == 0 && instructions[_currentLine - 1]?.OpCode == OpCode.Self)
+                {
+                    // Pattern: GetService call
+                    var serviceName = instructions[_currentLine - 2].OpCode == OpCode.LoadK 
+                        ? FormatConstant(function.Constants[instructions[_currentLine - 2].B])
+                        : $"R{instructions[_currentLine - 2].B}";
+                    
+                    return $"local R{A} = game:GetService({serviceName})";
+                }
+                else if (A == 9 && C == 2 && instructions[_currentLine - 1]?.OpCode == OpCode.LoadBool)
+                {
+                    // Pattern: HttpGet with boolean
+                    return $"local R{A} = game:HttpGet(R{instruction.A + 1}, R{instruction.A + 2}, true)";
+                }
+                break;
+
+            case OpCode.Test:
+                // Conditional jump - start of if statement
+                if (C == 1 && instructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
+                {
+                    var jmpOffset = instructions[_currentLine + 1].B;
+                    var condition = C == 0 ? $"not R{A}" : $"R{A}";
+                    
+                    _indentLevel++;
+                    _builder.Append(new string(' ', (_indentLevel - 1) * 4));
+                    _builder.AppendLine($"if {condition} then");
+                    return "";
+                }
+                break;
+
+            case OpCode.Jmp:
+                // Handle jumps
+                if (B > 0)
+                {
+                    // Forward jump (skip block)
+                    return "";
+                }
+                else if (B < 0)
+                {
+                    // Backward jump (loop end)
+                    _indentLevel--;
+                    _builder.Append(new string(' ', _indentLevel * 4));
+                    _builder.AppendLine("end");
+                    return "";
+                }
+                break;
+
+            case OpCode.Return:
+                if (B == 1)
+                {
+                    return "return";
+                }
+                else if (B > 1)
+                {
+                    var returns = string.Join(", ", Enumerable.Range(0, B - 1).Select(i => $"R{A + i}"));
+                    return $"return {returns}";
+                }
+                break;
+
+            case OpCode.NewTable:
+                return $"local R{A} = {{}}";
+
+            case OpCode.GetTable:
+                var table = GetRegisterName(B, localVarNames);
+                var index = C >= 256 ? FormatConstant(function.Constants[C - 256]) : $"R{C}";
+                return $"local R{A} = {table}[{index}]";
+
+            case OpCode.Eq:
+                if (instructions[_currentLine + 1]?.OpCode == OpCode.Jmp)
+                {
+                    var left = B >= 256 ? FormatConstant(function.Constants[B - 256]) : $"R{B}";
+                    var right = C >= 256 ? FormatConstant(function.Constants[C - 256]) : $"R{C}";
+                    var op = A == 0 ? "==" : "~=";
+                    return $"if {left} {op} {right} then";
+                }
+                break;
+
+            case OpCode.ForPrep:
+                // Start of numeric for loop
+                _indentLevel++;
+                _builder.Append(new string(' ', (_indentLevel - 1) * 4));
+                _builder.AppendLine($"for R{A} = R{A}, R{A + 1}, R{A + 2} do");
+                return "";
+
+            case OpCode.ForLoop:
+                // Loop body continues
+                return "";
+
+            case OpCode.TForLoop:
+                // Generic for loop (pairs/ipairs)
+                var iterator = $"R{A}";
+                var state = $"R{A + 1}";
+                var control = $"R{A + 2}";
+                return $"{string.Join(", ", Enumerable.Range(3, C).Select(i => $"R{A + i}"))} = {iterator}({state}, {control})";
+
+            case OpCode.Closure:
+                return $"local R{A} = function() -- function_{function.Functions[B].Name}";
+
             case OpCode.LoadBool:
                 var value = B != 0 ? "true" : "false";
-                var skip = C != 0 ? "; PC += 1" : "";
-                return $"R{A} = {value}{skip}";
-            case OpCode.Move:
-                return $"R{A} = R{B}";
-            case OpCode.Jmp:
-                return $"PC += {B}";
-            case OpCode.GetUpval:
-                return $"R{A} = UPVALUE_{B}";
-            case OpCode.SetUpval:
-                return $"UPVALUE_{B} = R{A}";
-            case OpCode.GetTable:
-                return $"R{A} = R{B}[{RegisterOrConstant(C, function)}]";
-            case OpCode.SetTable:
-                return $"R{A}[{RegisterOrConstant(B, function)}] = {RegisterOrConstant(C, function)}";
-            case OpCode.NewTable:
-                return $"R{A} = {{}}";
-            case OpCode.Self:
-                return $"R{A + 1} = R{B}; R{A} = R{B}[{RegisterOrConstant(C, function)}]";
-            case OpCode.Add:
-                return $"R{A} = {RegisterOrConstant(B, function)} + {RegisterOrConstant(C, function)}";
-            case OpCode.Sub:
-                return $"R{A} = {RegisterOrConstant(B, function)} - {RegisterOrConstant(C, function)}";
-            case OpCode.Mul:
-                return $"R{A} = {RegisterOrConstant(B, function)} * {RegisterOrConstant(C, function)}";
-            case OpCode.Div:
-                return $"R{A} = {RegisterOrConstant(B, function)} / {RegisterOrConstant(C, function)}";
-            case OpCode.Mod:
-                return $"R{A} = {RegisterOrConstant(B, function)} % {RegisterOrConstant(C, function)}";
-            case OpCode.Pow:
-                return $"R{A} = {RegisterOrConstant(B, function)} ^ {RegisterOrConstant(C, function)}";
-            case OpCode.Unm:
-                return $"R{A} = -R{B}";
-            case OpCode.Not:
-                return $"R{A} = not R{B}";
-            case OpCode.Len:
-                return $"R{A} = #R{B}";
-            case OpCode.Concat:
-                var result = new StringBuilder();
-                result.Append($"R{A} = ");
+                return $"local R{A} = {value}";
 
-                for (var i = B; i <= C; i++)
+            case OpCode.LoadNil:
+                if (B - A == 0)
                 {
-                    result.Append($"R{i}");
-
-                    if (i + 1 <= C)
-                        result.Append(" .. ");
+                    return $"local R{A} = nil";
                 }
+                break;
 
-                return result.ToString();
-            case OpCode.Eq:
-            case OpCode.Lt:
-            case OpCode.Le:
-                var op = instruction.OpCode switch
+            case OpCode.SetGlobal:
+                if (B < function.Constants.Count && function.Constants[B] is StringConstant strConst2)
                 {
-                    OpCode.Eq => A == 0 ? "==" : "~=",
-                    OpCode.Lt => A == 0 ? "<" : ">",
-                    OpCode.Le => A == 0 ? "<=" : ">=",
-                    _ => " ?? "
-                };
-                return $"if {RegisterOrConstant(B, function)} {op} {RegisterOrConstant(C, function)} then PC += 1";
-            case OpCode.Test:
-                return $"if {(C == 0 ? $"not R{A}" : $"R{A}")} then PC += 1";
-            case OpCode.TestSet:
-                return $"if {(C == 0 ? $"not R{B}" : $"R{B}")} then R{A} = R{B} else PC += 1";
-            case OpCode.Call:
-                var lhs = C switch
-                {
-                    0 => $"R{A}->top = ",
-                    1 => "",
-                    _ => string.Join(", ", Enumerable.Range(0, C - 1).Select(i => $"R{A + i}")) + " = "
-                };
-                var args = B switch
-                {
-                    0 => $"R{A + 1}->top",
-                    1 => "",
-                    _ => string.Join(", ", Enumerable.Range(1, B - 1).Select(i => $"R{A + i}"))
-                };
-
-                var r = $"{lhs}R{A}({args})";
-                return r;
-            case OpCode.TailCall:
-                return B switch
-                {
-                    > 1 => $"return R{A}({string.Join(", ", Enumerable.Range(1, B - 1).Select(i => $"R{A + i}"))})",
-                    0 => $"return R{A}()",
-                    1 => $"return R{A}(R{A + 1})",
-                    _ => $"return R{A}()"
-                };
-            case OpCode.Return:
-                return B switch
-                {
-                    0 => $"return R{A}->top",
-                    1 => "return",
-                    _ => $"return {string.Join(", ", Enumerable.Range(0, B - 1).Select(i => $"R{A + i}"))}"
-                };
-            case OpCode.ForLoop:
-                return $"R{A} += R{A + 2}; if loop continues then PC += {B}; R{A + 3} = R{A};";
-            case OpCode.ForPrep:
-                return $"R{A} -= R{A + 2}; PC += {B}";
-            case OpCode.TForLoop:
-                var targets = string.Join(", ", Enumerable.Range(3, C).Select(i => $"R{A + i}"));
-                var call = $"R{A}(R{A + 1}, R{A + 2})";
-                var body = $"if R{A + 3} ~= nil then R{A + 2} = R{A + 3} else PC += 1 end";
-                return $"{targets} = {call}; {body}";
-            case OpCode.Closure:
-                return $"R{A} = {function.Functions[B].Name}";
-            case OpCode.VarArg:
-                var a = B switch
-                {
-                    0 => $"R{A}->top",
-                    1 => "",
-                    _ => string.Join(", ", Enumerable.Range(0, B - 1).Select(i => $"R{A + i}"))
-                };
-                return $"{a} = ...";
+                    return $"{strConst2.Value} = R{A}";
+                }
+                break;
         }
 
         return "";
     }
 
-    private static string RegisterOrConstant(int register, Function function) =>
-        register > 255 ? function.Constants[register - 256].ToString()! : $"R{register}";
+    private string GetRegisterName(int register, Dictionary<int, string> localVarNames)
+    {
+        if (localVarNames.ContainsKey(register))
+        {
+            return localVarNames[register];
+        }
+        
+        // Generate meaningful names based on usage
+        return $"R{register}";
+    }
+
+    private string FormatConstant(Constant constant)
+    {
+        if (constant is StringConstant str)
+        {
+            return $"\"{str.Value}\"";
+        }
+        else if (constant is NumberConstant num)
+        {
+            return num.Value.ToString();
+        }
+        else if (constant is BoolConstant boolConst)
+        {
+            return boolConst.Value ? "true" : "false";
+        }
+        else if (constant is NilConstant)
+        {
+            return "nil";
+        }
+        
+        return constant.ToString();
+    }
+
+    private string GetIndent()
+    {
+        return new string(' ', _indentLevel * 4);
+    }
 }
