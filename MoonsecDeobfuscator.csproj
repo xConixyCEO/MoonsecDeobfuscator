@@ -6,7 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <RootNamespace>MoonsecDeobfuscator</RootNamespace>
-    <!-- SUPPRESS WARNINGS -->
     <NoWarn>8632;3021</NoWarn>
   </PropertyGroup>
 
