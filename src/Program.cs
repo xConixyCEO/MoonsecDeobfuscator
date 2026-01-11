@@ -1,13 +1,15 @@
 using Discord;
 using Discord.WebSocket;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
-using MoonsecDeobfuscator.src.Deobfuscation;          // Add these namespaces
-using MoonsecDeobfuscator.src.Deobfuscation.Bytecode; // from your Moonsec project
+using MoonsecDeobfuscator.Deobfuscation;          // FIXED: Removed .src
+using MoonsecDeobfuscator.Deobfuscation.Bytecode; // FIXED: Removed .src
 
 namespace MoonsecDeobfuscator
 {
@@ -49,7 +51,6 @@ namespace MoonsecDeobfuscator
         {
             if (msg.Author.IsBot) return;
 
-            // Check for .l command anywhere in message
             if (!msg.Content.ToLowerInvariant().Contains(".l"))
                 return;
 
@@ -84,7 +85,7 @@ namespace MoonsecDeobfuscator
 
                 try
                 {
-                    // Step 1: Deobfuscate and generate bytecode (IN-MEMORY)
+                    // Step 1: Deobfuscate and generate bytecode
                     var deob = new Deobfuscator();
                     BytecodeChunk result = deob.Deobfuscate(sourceCode);
                     
@@ -98,10 +99,9 @@ namespace MoonsecDeobfuscator
                         serializer.Serialize(result);
                     }
 
-                    Console.WriteLine($"✅ Bytecode serialized to: {tempBytecode}");
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    // Step 3: Call Medal on the bytecode file (EXTERNAL PROCESS)
+                    // Step 3: Call Medal
                     var medalProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
