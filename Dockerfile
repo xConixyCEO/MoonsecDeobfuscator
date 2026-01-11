@@ -2,7 +2,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0-alpine AS moonsec-builder
 WORKDIR /build
 COPY . .
-RUN dotnet publish -c Release -o /app
+RUN dotnet publish src/MoonsecDeobfuscator.csproj -c Release -o /app
 
 # Stage 2: Clone & Build Medal (Rust)
 FROM rust:alpine AS medal-builder
@@ -30,5 +30,4 @@ COPY --from=medal-builder /app/medal ./
 # Make executables runnable
 RUN chmod +x ./MoonsecDeobfuscator ./medal
 
-EXPOSE 3000
 CMD ["dotnet", "MoonsecDeobfuscator.dll"]
