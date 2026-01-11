@@ -7,10 +7,9 @@ services:
     branch: main
     autoDeploy: true
     dockerBuildTimeoutSeconds: 1800
-    healthCheckPath: /health
+    healthCheckPath: /
     envVars:
       - key: DISCORD_TOKEN
-        sync: false  # Set this in Render dashboard
+        sync: false
       - key: DOTNET_SYSTEM_GLOBALIZATION_INVARIANT
         value: "1"
-
