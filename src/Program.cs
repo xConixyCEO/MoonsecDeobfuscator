@@ -15,7 +15,6 @@ namespace MoonsecDeobfuscator
     public static class Program
     {
         private static DiscordSocketClient _client;
-        private static readonly ulong TargetChannel = 1444258745336070164;
         private static readonly Dictionary<ulong, bool> Busy = new Dictionary<ulong, bool>();
         private static readonly HttpClient HttpClient = new HttpClient();
 
@@ -51,8 +50,8 @@ namespace MoonsecDeobfuscator
         {
             if (msg.Author.IsBot) return;
 
-            if (msg.Channel.Id != TargetChannel && msg.Channel is not SocketDMChannel)
-                return;
+            // NEW: Check for .l command prefix
+            if (!msg.Content.Trim().StartsWith(".l")) return;
 
             if (Busy.ContainsKey(msg.Author.Id))
             {
@@ -69,13 +68,7 @@ namespace MoonsecDeobfuscator
                 if (msg.Attachments.Count > 0)
                 {
                     var att = msg.Attachments.First();
-                    if (!(att.Filename.ToLower().EndsWith(".lua") || att.Filename.ToLower().EndsWith(".luau") || att.Filename.ToLower().EndsWith(".txt")))
-                    {
-                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Only .lua, .luau, or .txt files are allowed.");
-                        Busy.Remove(msg.Author.Id);
-                        return;
-                    }
-
+                    // NEW: Accept ANY file type
                     using var hc = new HttpClient();
                     var bytes = await hc.GetByteArrayAsync(att.Url);
                     sourceCode = Encoding.UTF8.GetString(bytes);
@@ -96,7 +89,7 @@ namespace MoonsecDeobfuscator
                     var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
                     await File.WriteAllTextAsync(tempInput, sourceCode);
 
-                    // Step 2: Run Moonsec CLI to dump bytecode
+                    // Step 2: Run Moonsec CLI
                     var moonsecProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
@@ -113,7 +106,6 @@ namespace MoonsecDeobfuscator
                     moonsecProcess.Start();
                     await moonsecProcess.WaitForExitAsync();
 
-                    // Clean up input file immediately
                     try { File.Delete(tempInput); } catch { }
 
                     if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
@@ -125,7 +117,7 @@ namespace MoonsecDeobfuscator
 
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    // Step 3: Call Medal on the bytecode file
+                    // Step 3: Call Medal
                     var medalProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
@@ -143,7 +135,6 @@ namespace MoonsecDeobfuscator
                     var decompiledCode = await medalProcess.StandardOutput.ReadToEndAsync();
                     await medalProcess.WaitForExitAsync();
 
-                    // Cleanup bytecode file
                     try { File.Delete(tempBytecode); } catch { }
 
                     if (medalProcess.ExitCode != 0)
