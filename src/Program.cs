@@ -77,8 +77,7 @@ namespace MoonsecDeobfuscator
                         return;
                     }
 
-                    using var hc = new HttpClient();
-                    sourceBytes = await hc.GetByteArrayAsync(att.Url);
+                    sourceBytes = await HttpClient.GetByteArrayAsync(att.Url);
                 }
 
                 if (sourceBytes == null)
