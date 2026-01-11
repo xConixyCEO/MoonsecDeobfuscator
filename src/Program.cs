@@ -113,6 +113,9 @@ namespace MoonsecDeobfuscator
                     moonsecProcess.Start();
                     await moonsecProcess.WaitForExitAsync();
 
+                    // Clean up input file immediately
+                    try { File.Delete(tempInput); } catch { }
+
                     if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
                     {
                         var error = await moonsecProcess.StandardError.ReadToEndAsync();
@@ -122,7 +125,7 @@ namespace MoonsecDeobfuscator
 
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    // Step 3: Call Medal binary on the bytecode
+                    // Step 3: Call Medal on the bytecode file
                     var medalProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
@@ -140,12 +143,8 @@ namespace MoonsecDeobfuscator
                     var decompiledCode = await medalProcess.StandardOutput.ReadToEndAsync();
                     await medalProcess.WaitForExitAsync();
 
-                    // Cleanup temp files
-                    try 
-                    { 
-                        File.Delete(tempInput); 
-                        File.Delete(tempBytecode); 
-                    } catch { }
+                    // Cleanup bytecode file
+                    try { File.Delete(tempBytecode); } catch { }
 
                     if (medalProcess.ExitCode != 0)
                     {
