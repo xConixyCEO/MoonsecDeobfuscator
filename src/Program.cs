@@ -8,8 +8,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
-using MoonsecDeobfuscator.Deobfuscation;          // FIXED: Removed .src
-using MoonsecDeobfuscator.Deobfuscation.Bytecode; // FIXED: Removed .src
+// FIXED: Use the correct namespaces from your CLI code
+using MoonsecDeobfuscator.src.Deobfuscation;
+using MoonsecDeobfuscator.src.Deobfuscation.Bytecode;
 
 namespace MoonsecDeobfuscator
 {
