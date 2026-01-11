@@ -1,27 +1,30 @@
 using Discord;
 using Discord.WebSocket;
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 
-namespace GalacticBytecodeBot
+namespace MoonsecDeobfuscator
 {
     public static class Program
     {
         private static DiscordSocketClient _client;
         private static readonly ulong TargetChannel = 1444258745336070164;
         private static readonly Dictionary<ulong, bool> Busy = new Dictionary<ulong, bool>();
+        private static readonly HttpClient HttpClient = new HttpClient();
 
         public static async Task Main()
         {
-            var token = Environment.GetEnvironmentVariable("BOT_TOKEN");
+            var token = Environment.GetEnvironmentVariable("DISCORD_TOKEN");
             if (string.IsNullOrWhiteSpace(token))
             {
-                Console.WriteLine("BOT_TOKEN missing");
+                Console.WriteLine("❌ DISCORD_TOKEN environment variable is missing");
                 return;
             }
 
@@ -32,8 +35,9 @@ namespace GalacticBytecodeBot
 
             _client.Ready += async () =>
             {
-                await _client.SetStatusAsync(UserStatus.DoNotDisturb);
-                await _client.SetActivityAsync(new Game("Galactic Deobfuscatio"));
+                await _client.SetStatusAsync(UserStatus.Online);
+                await _client.SetActivityAsync(new Game("🌙 MoonSec → Medal Pipeline"));
+                Console.WriteLine($"✅ Bot connected as {_client.CurrentUser}");
             };
 
             _client.MessageReceived += HandleMessage;
@@ -52,7 +56,7 @@ namespace GalacticBytecodeBot
 
             if (Busy.ContainsKey(msg.Author.Id))
             {
-                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} please wait, your previous request is still processing.");
+                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} please wait, your previous request is processing.");
                 return;
             }
 
@@ -67,14 +71,14 @@ namespace GalacticBytecodeBot
                     var att = msg.Attachments.First();
                     if (!(att.Filename.ToLower().EndsWith(".lua") || att.Filename.ToLower().EndsWith(".luau") || att.Filename.ToLower().EndsWith(".txt")))
                     {
-                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} this file type is not allowed.");
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Only .lua, .luau, or .txt files are allowed.");
                         Busy.Remove(msg.Author.Id);
                         return;
                     }
 
-                    using HttpClient hc = new HttpClient();
+                    using var hc = new HttpClient();
                     var bytes = await hc.GetByteArrayAsync(att.Url);
-                    sourceCode = System.Text.Encoding.UTF8.GetString(bytes);
+                    sourceCode = Encoding.UTF8.GetString(bytes);
                 }
 
                 if (sourceCode == null)
@@ -83,71 +87,104 @@ namespace GalacticBytecodeBot
                     return;
                 }
 
-                var statusMsg = await msg.Channel.SendMessageAsync("Turning to bytecode...");
-
-                string bytecodeFile = Guid.NewGuid().ToString().Substring(0, 8) + ".luac";
-                string tempFilePath = Path.Combine(Path.GetTempPath(), bytecodeFile);
+                var statusMsg = await msg.Channel.SendMessageAsync("🔄 **Processing:** MoonSec deobfuscation & bytecode dump...");
 
                 try
                 {
-                    await statusMsg.ModifyAsync(m => m.Content = "Processing...");
+                    // Step 1: Write source to temp file
+                    var tempInput = Path.Combine(Path.GetTempPath(), $"{msg.Id}.lua");
+                    var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
+                    await File.WriteAllTextAsync(tempInput, sourceCode);
 
-                    using (var deob = new Deobfuscator())
+                    // Step 2: Run Moonsec CLI to dump bytecode
+                    var moonsecProcess = new Process
                     {
-                        var result = deob.Deobfuscate(sourceCode);
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "/app/MoonsecDeobfuscator",
+                            Arguments = $"-dev -i \"{tempInput}\" -o \"{tempBytecode}\"",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
 
-                        if (result != null)
-                        {
-                            if (result is byte[] byteArray)
-                            {
-                                File.WriteAllBytes(tempFilePath, byteArray);
-                            }
-                            else
-                            {
-                                string resultString = result.ToString();
-                                File.WriteAllText(tempFilePath, resultString);
-                            }
-                        }
-                        else
-                        {
-                            File.WriteAllText(tempFilePath, sourceCode);
-                        }
+                    moonsecProcess.Start();
+                    await moonsecProcess.WaitForExitAsync();
+
+                    if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
+                    {
+                        var error = await moonsecProcess.StandardError.ReadToEndAsync();
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Moonsec error: {error}");
+                        return;
                     }
 
-                    await statusMsg.ModifyAsync(m => m.Content = "Bytecode generated successfully");
+                    await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    if (File.Exists(tempFilePath) && new FileInfo(tempFilePath).Length > 0)
+                    // Step 3: Call Medal binary on the bytecode
+                    var medalProcess = new Process
                     {
-                        var embed = new EmbedBuilder()
-                            .WithTitle("Luau Bytecode Generated")
-                            .WithColor(new Color((uint)new Random().Next(0xFFFFFF)))
-                            .WithDescription("Your file has been converted to Luau bytecode.")
-                            .WithFooter("Galactic Services")
-                            .Build();
-
-                        await using (var fs = new FileStream(tempFilePath, FileMode.Open, FileAccess.Read))
+                        StartInfo = new ProcessStartInfo
                         {
-                            await msg.Channel.SendFileAsync(fs, bytecodeFile, $"{msg.Author.Mention} here is your bytecode file", embed: embed);
+                            FileName = "/app/medal",
+                            Arguments = $"\"{tempBytecode}\"",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
                         }
+                    };
+
+                    medalProcess.Start();
+                    var decompiledCode = await medalProcess.StandardOutput.ReadToEndAsync();
+                    await medalProcess.WaitForExitAsync();
+
+                    // Cleanup temp files
+                    try 
+                    { 
+                        File.Delete(tempInput); 
+                        File.Delete(tempBytecode); 
+                    } catch { }
+
+                    if (medalProcess.ExitCode != 0)
+                    {
+                        var error = await medalProcess.StandardError.ReadToEndAsync();
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Medal error: {error}");
+                        return;
+                    }
+
+                    // Step 4: Send result
+                    var embed = new EmbedBuilder()
+                        .WithTitle("✅ **Deobfuscated & Decompiled**")
+                        .WithColor(Color.Green)
+                        .WithFooter($"MoonsecDeobfuscator | {msg.Author.Username}");
+
+                    if (decompiledCode.Length > 2000)
+                    {
+                        var tempFile = Path.Combine(Path.GetTempPath(), $"{msg.Id}_decompiled.lua");
+                        await File.WriteAllTextAsync(tempFile, decompiledCode);
+                        
+                        await using (var fs = new FileStream(tempFile, FileMode.Open, FileAccess.Read))
+                        {
+                            await msg.Channel.SendFileAsync(fs, "decompiled.lua", 
+                                $"{msg.Author.Mention} here is your decompiled code:", embed: embed.Build());
+                        }
+                        
+                        try { File.Delete(tempFile); } catch { }
                     }
                     else
                     {
-                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} failed to generate bytecode file.");
+                        embed.WithDescription($"```lua\n{decompiledCode}\n```");
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention}", embed: embed.Build());
                     }
+
+                    await statusMsg.DeleteAsync();
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error: {ex}");
-                    await msg.Channel.SendMessageAsync($"{msg.Author.Mention} an error occurred during processing: {ex.Message}");
-                }
-                finally
-                {
-                    try
-                    {
-                        if (File.Exists(tempFilePath))
-                            File.Delete(tempFilePath);
-                    }
-                    catch { }
+                    Console.WriteLine($"❌ Error: {ex}");
+                    await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Processing error: {ex.Message}");
                 }
 
                 try
@@ -158,8 +195,8 @@ namespace GalacticBytecodeBot
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error: {ex}");
-                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} an error occurred.");
+                Console.WriteLine($"❌ Error: {ex}");
+                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ An error occurred.");
             }
             finally
             {
