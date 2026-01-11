@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
-using MoonsecDeobfuscator.Deobfuscation;
 
 namespace MoonsecDeobfuscator
 {
@@ -65,7 +64,7 @@ namespace MoonsecDeobfuscator
 
             try
             {
-                byte[] sourceBytes = null;
+                string sourceCode = null;
 
                 if (msg.Attachments.Count > 0)
                 {
@@ -77,39 +76,53 @@ namespace MoonsecDeobfuscator
                         return;
                     }
 
-                    sourceBytes = await HttpClient.GetByteArrayAsync(att.Url);
+                    using var hc = new HttpClient();
+                    var bytes = await hc.GetByteArrayAsync(att.Url);
+                    sourceCode = Encoding.UTF8.GetString(bytes);
                 }
 
-                if (sourceBytes == null)
+                if (sourceCode == null)
                 {
                     Busy.Remove(msg.Author.Id);
                     return;
                 }
 
-                var statusMsg = await msg.Channel.SendMessageAsync("🔄 **Processing:** MoonSec deobfuscation...");
+                var statusMsg = await msg.Channel.SendMessageAsync("🔄 **Processing:** MoonSec deobfuscation & bytecode dump...");
 
                 try
                 {
-                    // Step 1: Deobfuscate and get bytecode
-                    byte[] bytecode;
-                    using (var deob = new Deobfuscator())
+                    // Step 1: Write source to temp file
+                    var tempInput = Path.Combine(Path.GetTempPath(), $"{msg.Id}.lua");
+                    var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
+                    await File.WriteAllTextAsync(tempInput, sourceCode);
+
+                    // Step 2: Run Moonsec CLI to dump bytecode
+                    var moonsecProcess = new Process
                     {
-                        var result = deob.Deobfuscate(sourceBytes);
-                        
-                        bytecode = result switch
+                        StartInfo = new ProcessStartInfo
                         {
-                            byte[] b => b,
-                            string s => Encoding.UTF8.GetBytes(s),
-                            _ => throw new Exception("Deobfuscator returned invalid format")
-                        };
+                            FileName = "/app/MoonsecDeobfuscator",
+                            Arguments = $"-dev -i \"{tempInput}\" -o \"{tempBytecode}\"",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
+
+                    moonsecProcess.Start();
+                    await moonsecProcess.WaitForExitAsync();
+
+                    if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
+                    {
+                        var error = await moonsecProcess.StandardError.ReadToEndAsync();
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Moonsec error: {error}");
+                        return;
                     }
 
-                    await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with local Medal...");
+                    await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    // Step 2: Call Medal binary directly (local file)
-                    var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
-                    await File.WriteAllBytesAsync(tempBytecode, bytecode);
-
+                    // Step 3: Call Medal binary on the bytecode
                     var medalProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
@@ -127,8 +140,12 @@ namespace MoonsecDeobfuscator
                     var decompiledCode = await medalProcess.StandardOutput.ReadToEndAsync();
                     await medalProcess.WaitForExitAsync();
 
-                    // Cleanup temp file
-                    try { File.Delete(tempBytecode); } catch { }
+                    // Cleanup temp files
+                    try 
+                    { 
+                        File.Delete(tempInput); 
+                        File.Delete(tempBytecode); 
+                    } catch { }
 
                     if (medalProcess.ExitCode != 0)
                     {
@@ -137,7 +154,7 @@ namespace MoonsecDeobfuscator
                         return;
                     }
 
-                    // Step 3: Send result
+                    // Step 4: Send result
                     var embed = new EmbedBuilder()
                         .WithTitle("✅ **Deobfuscated & Decompiled**")
                         .WithColor(Color.Green)
