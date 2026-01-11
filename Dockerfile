@@ -2,7 +2,8 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0-alpine AS moonsec-builder
 WORKDIR /build
 COPY . .
-RUN dotnet publish -c Release -o /app
+# Suppress nullable reference type warnings (CS8632) and CLSCompliant warnings (CS3021)
+RUN dotnet publish -c Release -o /app /p:NoWarn="8632;3021"
 
 # Stage 2: Clone & Build Medal (Rust)
 FROM rust:alpine AS medal-builder
@@ -12,7 +13,6 @@ RUN rustup install nightly
 RUN git clone https://github.com/xConixyCEO/medal.git
 WORKDIR /build/medal
 RUN cargo +nightly build --release --bin luau-lifter
-# Remove the problematic cp command - we'll copy directly in the final stage
 
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/runtime:9.0-alpine
