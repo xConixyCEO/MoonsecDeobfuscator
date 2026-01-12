@@ -17,8 +17,10 @@ RUN cargo +nightly build --release --bin medal
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
-# Install curl + LUA libraries required by NLua
-RUN apk add --no-cache curl lua5.4 lua5.4-dev
+# Install curl + LUA libraries + create symlink for NLua
+RUN apk add --no-cache curl lua5.4 lua5.4-dev && \
+    # Create symlink so NLua can find lua54.so
+    ln -sf /usr/lib/liblua5.4.so /usr/lib/liblua54.so
 
 # Copy bot files
 COPY --from=moonsec-builder /app/* ./
