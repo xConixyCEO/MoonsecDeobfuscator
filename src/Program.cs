@@ -8,8 +8,6 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
-using MoonsecDeobfuscator.Deobfuscation;
-using MoonsecDeobfuscator.Deobfuscation.Bytecode;
 
 namespace MoonsecDeobfuscator
 {
@@ -85,18 +83,35 @@ namespace MoonsecDeobfuscator
 
                 try
                 {
-                    // Step 1: Deobfuscate and generate bytecode
-                    var deob = new Deobfuscator();
-                    BytecodeChunk result = deob.Deobfuscate(sourceCode);
-                    
+                    // Step 1: Write source to temp file
+                    var tempInput = Path.Combine(Path.GetTempPath(), $"{msg.Id}.lua");
                     var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
-                    await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Serializing bytecode...");
+                    await File.WriteAllTextAsync(tempInput, sourceCode);
 
-                    // Step 2: Serialize bytecode to file
-                    using (var stream = new FileStream(tempBytecode, FileMode.Create, FileAccess.Write))
-                    using (var serializer = new Serializer(stream))
+                    // Step 2: Run Moonsec CLI
+                    var moonsecProcess = new Process
                     {
-                        serializer.Serialize(result);
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "/app/MoonsecDeobfuscator",
+                            Arguments = $"-dev -i \"{tempInput}\" -o \"{tempBytecode}\"",
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
+
+                    moonsecProcess.Start();
+                    await moonsecProcess.WaitForExitAsync();
+
+                    try { File.Delete(tempInput); } catch { }
+
+                    if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
+                    {
+                        var error = await moonsecProcess.StandardError.ReadToEndAsync();
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Moonsec error: {error}");
+                        return;
                     }
 
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
@@ -180,4 +195,3 @@ namespace MoonsecDeobfuscator
         }
     }
 }
-
