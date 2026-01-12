@@ -10,7 +10,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using MoonsecDeobfuscator.Deobfuscation;
-using MoonsecDeobfuscator.Deobfuscation.Bytecode;
+using MoonsecDeobfuscator.Bytecode.Models; // CORRECT namespace for Function
 
 namespace GalacticBytecodeBot
 {
@@ -110,20 +110,18 @@ namespace GalacticBytecodeBot
 
                 try
                 {
-                    // Step 1: Generate bytecode with Moonsec library
+                    // Step 1: Generate bytecode with Moonsec library (NO using statement)
                     Console.WriteLine("🚀 Running Moonsec library...");
                     Function result;
-                    using (var deob = new Deobfuscator())
-                    {
-                        result = deob.Deobfuscate(sourceCode);
-                    }
+                    var deob = new Deobfuscator();
+                    result = deob.Deobfuscate(sourceCode);
                     
                     var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Serializing bytecode...");
                     
                     // Serialize bytecode to file
                     using (var stream = new FileStream(tempBytecode, FileMode.Create, FileAccess.Write))
-                    using (var serializer = new Serializer(stream))
+                    using (var serializer = new MoonsecDeobfuscator.Deobfuscation.Bytecode.Serializer(stream))
                     {
                         serializer.Serialize(result);
                     }
