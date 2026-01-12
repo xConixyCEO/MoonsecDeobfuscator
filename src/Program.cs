@@ -8,9 +8,8 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
-// KEEP .src in these:
-using MoonsecDeobfuscator.src.Deobfuscation;
-using MoonsecDeobfuscator.src.Deobfuscation.Bytecode;
+using MoonsecDeobfuscator.Deobfuscation;
+using MoonsecDeobfuscator.Deobfuscation.Bytecode;
 
 namespace MoonsecDeobfuscator
 {
@@ -37,7 +36,7 @@ namespace MoonsecDeobfuscator
             _client.Ready += async () =>
             {
                 await _client.SetStatusAsync(UserStatus.Online);
-                await _client.SetActivityAsync(new Game("Playing with Rats..."));
+                await _client.SetActivityAsync(new Game("🌙 MoonSec → Medal Pipeline"));
                 Console.WriteLine($"✅ Bot connected as {_client.CurrentUser}");
             };
 
@@ -181,3 +180,4 @@ namespace MoonsecDeobfuscator
         }
     }
 }
+
