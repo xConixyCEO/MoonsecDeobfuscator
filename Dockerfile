@@ -11,7 +11,8 @@ RUN apk add --no-cache git build-base
 RUN rustup install nightly
 RUN git clone https://github.com/xConixyCEO/medal.git
 WORKDIR /build/medal
-RUN cargo +nightly build --release --bin luau-lifter
+# Build the 'medal' binary (not luau-lifter)
+RUN cargo +nightly build --release --bin medal
 
 # Stage 3: Runtime
 FROM mcr.microsoft.com/dotnet/runtime:9.0-alpine
@@ -23,8 +24,8 @@ RUN apk add --no-cache curl
 # Copy Moonsec binary and DLLs
 COPY --from=moonsec-builder /app/* ./
 
-# Copy Medal binary
-COPY --from=medal-builder /build/medal/target/release/luau-lifter ./medal
+# Copy Medal binary (now correctly named 'medal')
+COPY --from=medal-builder /build/medal/target/release/medal ./medal
 
 # Make executables runnable
 RUN chmod +x ./MoonsecDeobfuscator ./medal
