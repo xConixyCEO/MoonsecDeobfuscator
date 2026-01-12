@@ -6,7 +6,14 @@ using System.Reflection;
 using System.Text;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Threading;
 using MoonsecDeobfuscator.Deobfuscation;
 using MoonsecDeobfuscator.Bytecode.Models;
 
@@ -21,7 +28,7 @@ namespace GalacticBytecodeBot
         public static async Task Main(string[] args)
         {
             // Load environment variables
-            DotNetEnv.Env.Load();
+            try { DotNetEnv.Env.Load(); } catch { Console.WriteLine("No .env file found, using environment variables."); }
             
             // Start health check server for Render
             _ = StartHealthCheckServer();
@@ -80,6 +87,11 @@ namespace GalacticBytecodeBot
             await _client.SetStatusAsync(UserStatus.Online);
             await _client.SetActivityAsync(new Game("🌙 MoonSec → Medal Pipeline"));
             Console.WriteLine($"✅ Bot connected as {_client.CurrentUser}");
+            
+            if (!File.Exists("/app/medal"))
+                Console.WriteLine("⚠️ WARNING: Medal not found at /app/medal");
+            else
+                Console.WriteLine("✅ Medal found at /app/medal");
         }
 
         private async Task HandleInteractionAsync(SocketInteraction interaction)
@@ -136,25 +148,27 @@ namespace GalacticBytecodeBot
                     return;
                 }
 
-                // Step 3: Send result
+                // Step 3: Send result - FIXED: Build after setting description
                 await ModifyOriginalResponseAsync(msg => msg.Content = "✅ **Step 3/3:** Sending result...");
 
-                var embed = new EmbedBuilder()
+                var embedBuilder = new EmbedBuilder()
                     .WithTitle("✅ Deobfuscation Complete")
                     .WithColor(Color.Green)
-                    .WithFooter($"Processed by {Context.User.Username}")
-                    .Build();
+                    .WithFooter($"Processed by {Context.User.Username}");
 
                 if (decompiled.Length > 2000)
                 {
+                    // Send as file
                     await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(decompiled));
                     await FollowupWithFileAsync(stream, "decompiled.lua", 
-                        text: $"{Context.User.Mention} here is your decompiled code:", embed: embed);
+                        text: $"{Context.User.Mention} here is your decompiled code:", 
+                        embed: embedBuilder.Build());
                 }
                 else
                 {
-                    embed.Description = $"```lua\n{decompiled}\n```";
-                    await FollowupAsync($"{Context.User.Mention}", embed: embed);
+                    // Send in embed
+                    embedBuilder.WithDescription($"```lua\n{decompiled}\n```");
+                    await FollowupAsync($"{Context.User.Mention}", embed: embedBuilder.Build());
                 }
 
                 await DeleteOriginalResponseAsync();
