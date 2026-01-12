@@ -17,10 +17,19 @@ RUN cargo +nightly build --release --bin medal
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
-# Install curl + LUA libraries + create symlink for NLua
-RUN apk add --no-cache curl lua5.4 lua5.4-dev && \
-    # Create symlink so NLua can find lua54.so
-    ln -sf /usr/lib/liblua5.4.so /usr/lib/liblua54.so
+# Install dependencies and fix Lua library loading
+RUN apk add --no-cache \
+    curl \
+    lua5.4 \
+    lua5.4-dev \
+    icu-libs && \
+    # Create symlinks for NLua
+    ln -sf /usr/lib/liblua5.4.so /usr/lib/liblua54.so && \
+    # Ensure library path includes /usr/lib
+    echo "/usr/lib" > /etc/ld-musl-x86_64.path
+
+# Enable globalization support
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0
 
 # Copy bot files
 COPY --from=moonsec-builder /app/* ./
