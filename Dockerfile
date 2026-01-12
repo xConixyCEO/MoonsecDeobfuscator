@@ -20,7 +20,7 @@ WORKDIR /app
 # Install curl + LUA libraries required by NLua
 RUN apk add --no-cache curl lua5.4 lua5.4-dev
 
-# Copy Moonsec binary and DLLs
+# Copy bot files
 COPY --from=moonsec-builder /app/* ./
 
 # Copy Medal binary
