@@ -41,8 +41,8 @@ namespace GalacticBytecodeBot
             var portStr = Environment.GetEnvironmentVariable("PORT") ?? "3000";
             var builder = WebApplication.CreateBuilder();
             
-
-            builder.WebHead.UseSetting("urls", $"http://0.0.0.0:{portStr}");
+            // FIXED: Use UseSetting instead of UseUrls for .NET 9.0
+            builder.WebHost.UseSetting("urls", $"http://0.0.0.0:{portStr}");
             
             var app = builder.Build();
             app.MapGet("/", () => "MoonSec Bot is running.");
@@ -232,4 +232,3 @@ namespace GalacticBytecodeBot
         }
     }
 }
-
