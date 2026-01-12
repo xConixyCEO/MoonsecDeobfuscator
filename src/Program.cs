@@ -8,7 +8,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
-// FIXED: Use the correct namespaces from your CLI code
+// KEEP .src in these:
 using MoonsecDeobfuscator.src.Deobfuscation;
 using MoonsecDeobfuscator.src.Deobfuscation.Bytecode;
 
@@ -37,7 +37,7 @@ namespace MoonsecDeobfuscator
             _client.Ready += async () =>
             {
                 await _client.SetStatusAsync(UserStatus.Online);
-                await _client.SetActivityAsync(new Game("🌙 MoonSec → Medal Pipeline"));
+                await _client.SetActivityAsync(new Game("Playing with Rats..."));
                 Console.WriteLine($"✅ Bot connected as {_client.CurrentUser}");
             };
 
