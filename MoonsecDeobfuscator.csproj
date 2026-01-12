@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- Suppress all warnings -->
-    <NoWarn>0200;8600;8618;8632;3021</NoWarn>
+    <NoWarn>0200;8600;8618;8625;8632;3021</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
