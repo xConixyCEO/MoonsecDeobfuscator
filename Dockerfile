@@ -14,7 +14,7 @@ WORKDIR /build/medal
 RUN cargo +nightly build --release --bin medal
 
 # Stage 3: Runtime (with Lua!)
-FROM mcr.microsoft.com/dotnet/runtime:9.0-alpine
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine  # <-- CHANGED: aspnet instead of runtime
 WORKDIR /app
 
 # Install curl + LUA libraries required by NLua
