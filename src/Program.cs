@@ -8,12 +8,16 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
+using MoonsecDeobfuscator.Deobfuscation;
+using MoonsecDeobfuscator.Deobfuscation.Bytecode;
 
-namespace MoonsecDeobfuscator
+namespace GalacticBytecodeBot
 {
     public static class Program
     {
         private static DiscordSocketClient _client;
+        private static readonly ulong TargetChannel = 1444258745336070164;
         private static readonly Dictionary<ulong, bool> Busy = new Dictionary<ulong, bool>();
         private static readonly HttpClient HttpClient = new HttpClient();
 
@@ -33,9 +37,14 @@ namespace MoonsecDeobfuscator
 
             _client.Ready += async () =>
             {
-                await _client.SetStatusAsync(UserStatus.Online);
+                await _client.SetStatusAsync(UserStatus.DoNotDisturb);
                 await _client.SetActivityAsync(new Game("🌙 MoonSec → Medal Pipeline"));
                 Console.WriteLine($"✅ Bot connected as {_client.CurrentUser}");
+                
+                if (!File.Exists("/app/medal"))
+                    Console.WriteLine("⚠️ WARNING: Medal not found at /app/medal");
+                else
+                    Console.WriteLine("✅ Medal found at /app/medal");
             };
 
             _client.MessageReceived += HandleMessage;
@@ -49,12 +58,20 @@ namespace MoonsecDeobfuscator
         {
             if (msg.Author.IsBot) return;
 
-            if (!msg.Content.ToLowerInvariant().Contains(".l"))
+            if (msg.Channel.Id != TargetChannel && msg.Channel is not SocketDMChannel)
                 return;
+
+            Console.WriteLine($"\n📥 [{DateTime.Now:HH:mm:ss}] {msg.Author.Username}: \"{msg.Content}\" | Attachments: {msg.Attachments.Count}");
+
+            if (!msg.Content.ToLowerInvariant().Contains(".l"))
+            {
+                Console.WriteLine("❌ No .l command found");
+                return;
+            }
 
             if (Busy.ContainsKey(msg.Author.Id))
             {
-                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ⏳ Please wait, your previous request is processing.");
+                await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ⏳ Please wait, your previous request is still processing.");
                 return;
             }
 
@@ -67,9 +84,19 @@ namespace MoonsecDeobfuscator
                 if (msg.Attachments.Count > 0)
                 {
                     var att = msg.Attachments.First();
+                    if (!(att.Filename.ToLower().EndsWith(".lua") || att.Filename.ToLower().EndsWith(".luau") || att.Filename.ToLower().EndsWith(".txt")))
+                    {
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} this file type is not allowed.");
+                        Busy.Remove(msg.Author.Id);
+                        return;
+                    }
+
+                    Console.WriteLine($"📎 Downloading: {att.Filename} ({att.Size} bytes)");
+                    
                     using var hc = new HttpClient();
                     var bytes = await hc.GetByteArrayAsync(att.Url);
                     sourceCode = Encoding.UTF8.GetString(bytes);
+                    Console.WriteLine($"✅ Downloaded {bytes.Length} bytes");
                 }
 
                 if (sourceCode == null)
@@ -83,40 +110,30 @@ namespace MoonsecDeobfuscator
 
                 try
                 {
-                    // Step 1: Write source to temp file
-                    var tempInput = Path.Combine(Path.GetTempPath(), $"{msg.Id}.lua");
-                    var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
-                    await File.WriteAllTextAsync(tempInput, sourceCode);
-
-                    // Step 2: Run Moonsec CLI
-                    var moonsecProcess = new Process
+                    // Step 1: Generate bytecode with Moonsec library
+                    Console.WriteLine("🚀 Running Moonsec library...");
+                    Function result;
+                    using (var deob = new Deobfuscator())
                     {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = "/app/MoonsecDeobfuscator",
-                            Arguments = $"-dev -i \"{tempInput}\" -o \"{tempBytecode}\"",
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            UseShellExecute = false,
-                            CreateNoWindow = true
-                        }
-                    };
-
-                    moonsecProcess.Start();
-                    await moonsecProcess.WaitForExitAsync();
-
-                    try { File.Delete(tempInput); } catch { }
-
-                    if (moonsecProcess.ExitCode != 0 || !File.Exists(tempBytecode))
-                    {
-                        var error = await moonsecProcess.StandardError.ReadToEndAsync();
-                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Moonsec error: {error}");
-                        return;
+                        result = deob.Deobfuscate(sourceCode);
                     }
-
+                    
+                    var tempBytecode = Path.Combine(Path.GetTempPath(), $"{msg.Id}.luac");
+                    await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Serializing bytecode...");
+                    
+                    // Serialize bytecode to file
+                    using (var stream = new FileStream(tempBytecode, FileMode.Create, FileAccess.Write))
+                    using (var serializer = new Serializer(stream))
+                    {
+                        serializer.Serialize(result);
+                    }
+                    
+                    Console.WriteLine($"✅ Bytecode serialized: {tempBytecode} ({new FileInfo(tempBytecode).Length} bytes)");
                     await statusMsg.ModifyAsync(m => m.Content = "🔄 **Processing:** Decompiling with Medal...");
 
-                    // Step 3: Call Medal
+                    // Step 2: Call Medal CLI
+                    Console.WriteLine("🚀 Running Medal...");
+                    var medalCts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
                     var medalProcess = new Process
                     {
                         StartInfo = new ProcessStartInfo
@@ -132,22 +149,37 @@ namespace MoonsecDeobfuscator
 
                     medalProcess.Start();
                     var decompiledCode = await medalProcess.StandardOutput.ReadToEndAsync();
-                    await medalProcess.WaitForExitAsync();
+                    var medalError = await medalProcess.StandardError.ReadToEndAsync();
+                    
+                    var medalExitTask = medalProcess.WaitForExitAsync();
+                    var medalTimeoutTask = Task.Delay(TimeSpan.FromMinutes(3), medalCts.Token);
+                    
+                    if (await Task.WhenAny(medalExitTask, medalTimeoutTask) == medalTimeoutTask)
+                    {
+                        Console.WriteLine("❌ Medal timed out after 3 minutes!");
+                        medalProcess.Kill();
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Medal timed out.");
+                        return;
+                    }
+
+                    Console.WriteLine($"Medal Exit Code: {medalProcess.ExitCode}");
+                    if (!string.IsNullOrWhiteSpace(medalError)) Console.WriteLine($"Medal Error: {medalError}");
 
                     try { File.Delete(tempBytecode); } catch { }
 
                     if (medalProcess.ExitCode != 0)
                     {
-                        var error = await medalProcess.StandardError.ReadToEndAsync();
-                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Medal error: {error}");
+                        await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Medal failed: {medalError}");
                         return;
                     }
 
-                    // Step 4: Send result
+                    Console.WriteLine($"✅ Decompiled {decompiledCode.Length} characters");
+                    
+                    // Step 3: Send decompiled Lua
                     var embed = new EmbedBuilder()
                         .WithTitle("✅ **Deobfuscated & Decompiled**")
                         .WithColor(Color.Green)
-                        .WithFooter($"MoonsecDeobfuscator | {msg.Author.Username}");
+                        .WithFooter($"Galactic Deobfuscator | {msg.Author.Username}");
 
                     if (decompiledCode.Length > 2000)
                     {
@@ -169,6 +201,7 @@ namespace MoonsecDeobfuscator
                     }
 
                     await statusMsg.DeleteAsync();
+                    Console.WriteLine("✅ Complete!");
                 }
                 catch (Exception ex)
                 {
@@ -176,11 +209,7 @@ namespace MoonsecDeobfuscator
                     await msg.Channel.SendMessageAsync($"{msg.Author.Mention} ❌ Processing error: {ex.Message}");
                 }
 
-                try
-                {
-                    await msg.DeleteAsync();
-                }
-                catch { }
+                try { await msg.DeleteAsync(); } catch { }
             }
             catch (Exception ex)
             {
