@@ -5,8 +5,8 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Suppress nullable reference type warnings -->
-    <NoWarn>8632;3021</NoWarn>
+    <!-- Suppress all warnings -->
+    <NoWarn>0200;8600;8618;8632;3021</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
