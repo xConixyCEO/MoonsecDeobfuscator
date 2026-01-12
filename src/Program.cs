@@ -41,8 +41,8 @@ namespace GalacticBytecodeBot
             var portStr = Environment.GetEnvironmentVariable("PORT") ?? "3000";
             var builder = WebApplication.CreateBuilder();
             
-            // FIX: Use UseUrls instead of ConfigureKestrel for newer ASP.NET Core
-            builder.WebHost.UseUrls($"http://*:{portStr}");
+
+            builder.WebHead.UseSetting("urls", $"http://0.0.0.0:{portStr}");
             
             var app = builder.Build();
             app.MapGet("/", () => "MoonSec Bot is running.");
@@ -232,3 +232,4 @@ namespace GalacticBytecodeBot
         }
     }
 }
+
