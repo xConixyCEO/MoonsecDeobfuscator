@@ -21,9 +21,9 @@ namespace GalacticBytecodeBot
 {
     public class Program
     {
-        private DiscordSocketClient _client;
-        private InteractionService _interactions;
-        private IServiceProvider _services;
+        private DiscordSocketClient _client = null!;
+        private InteractionService _interactions = null!;
+        private IServiceProvider _services = null!;
 
         public static async Task Main(string[] args)
         {
@@ -40,7 +40,9 @@ namespace GalacticBytecodeBot
         {
             var portStr = Environment.GetEnvironmentVariable("PORT") ?? "3000";
             var builder = WebApplication.CreateBuilder();
-            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Any, int.Parse(portStr)));
+            
+            // FIX: Use UseUrls instead of ConfigureKestrel for newer ASP.NET Core
+            builder.WebHost.UseUrls($"http://*:{portStr}");
             
             var app = builder.Build();
             app.MapGet("/", () => "MoonSec Bot is running.");
